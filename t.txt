@@ -1,0 +1,3 @@
+to run the system --> .\run.bat
+
+for ui --> python dashboard/server.py

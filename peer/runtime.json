@@ -1,0 +1,28 @@
+{
+  "downloaded_chunks": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+  ],
+  "total_chunks": 10,
+  "last_peer": "peer1",
+  "logs": [
+    "chunk_9 from peer1",
+    "chunk_8 from peer1",
+    "chunk_7 from peer3",
+    "chunk_6 from peer1",
+    "chunk_5 from peer1",
+    "chunk_4 from peer3",
+    "chunk_3 from peer3",
+    "chunk_2 from peer1",
+    "chunk_1 from peer3",
+    "chunk_0 from peer3"
+  ]
+}

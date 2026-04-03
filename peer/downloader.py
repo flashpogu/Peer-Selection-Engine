@@ -2,12 +2,37 @@ import argparse
 import requests
 import os
 import time
+import json
+
 from peer.ai_selector import select_best_peer
 from peer.config import TRACKER_URL
 
-# TRACKER_URL = "http://127.0.0.1:8000"
 DOWNLOAD_DIR = "peer/downloads"
+RUNTIME_FILE = "peer/runtime.json"
 TOTAL_CHUNKS = 10  # adjust
+
+
+# 🔹 Ensure runtime file exists
+def init_runtime():
+    if not os.path.exists(RUNTIME_FILE):
+        state = {
+            "downloaded_chunks": [],
+            "total_chunks": TOTAL_CHUNKS,
+            "last_peer": None,
+            "logs": []
+        }
+        with open(RUNTIME_FILE, "w") as f:
+            json.dump(state, f, indent=2)
+
+
+def load_state():
+    with open(RUNTIME_FILE, "r") as f:
+        return json.load(f)
+
+
+def save_state(state):
+    with open(RUNTIME_FILE, "w") as f:
+        json.dump(state, f, indent=2)
 
 
 def get_peers():
@@ -20,6 +45,8 @@ def get_peers():
 
 def download(peer_id):
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+    init_runtime()
+
     downloaded = set()
 
     while len(downloaded) < TOTAL_CHUNKS:
@@ -40,48 +67,29 @@ def download(peer_id):
                 r = requests.get(f"{peer_url}/chunk/{chunk_id}", timeout=3)
 
                 if r.status_code == 200:
+                    # Save chunk
                     with open(f"{DOWNLOAD_DIR}/chunk_{chunk_id}", "wb") as f:
                         f.write(r.content)
 
                     downloaded.add(chunk_id)
+
+                    # 🔥 Update runtime (for UI)
+                    state = load_state()
+                    state["downloaded_chunks"] = list(downloaded)
+                    state["last_peer"] = pid
+                    state["logs"].insert(0, f"chunk_{chunk_id} from {pid}")
+                    state["logs"] = state["logs"][:10]
+                    save_state(state)
+
                     print(f"⬇️ chunk_{chunk_id} from {pid}")
                     print(f"📊 Progress: {len(downloaded)}/{TOTAL_CHUNKS}")
 
-            except:
+            except Exception as e:
                 continue
 
         time.sleep(1)
 
-# NORMAL
-    # while len(downloaded) < TOTAL_CHUNKS:
-    #     peers = get_peers()
-
-    #     for pid, info in peers.items():
-    #         if pid == peer_id:
-    #             continue
-
-    #         peer_url = f"http://{info['ip']}:{info['port']}"
-
-    #         for chunk_id in range(TOTAL_CHUNKS):
-    #             if chunk_id in downloaded:
-    #                 continue
-
-    #             try:
-    #                 r = requests.get(f"{peer_url}/chunk/{chunk_id}", timeout=3)
-
-    #                 if r.status_code == 200:
-    #                     with open(f"{DOWNLOAD_DIR}/chunk_{chunk_id}", "wb") as f:
-    #                         f.write(r.content)
-
-    #                     downloaded.add(chunk_id)
-    #                     print(f"chunk_{chunk_id} from {pid}")
-
-    #             except:
-    #                 continue
-
-    #     time.sleep(1)
-
-    print("Download complete!")
+    print("✅ Download complete!")
     reconstruct()
 
 
@@ -95,9 +103,8 @@ def reconstruct():
 
     with open(output, "wb") as out:
         for chunk in chunks:
-            if chunk.startswith("chunk_"):
-                with open(os.path.join(DOWNLOAD_DIR, chunk), "rb") as f:
-                    out.write(f.read())
+            with open(os.path.join(DOWNLOAD_DIR, chunk), "rb") as f:
+                out.write(f.read())
 
     print(f"🎉 File ready: {output}")
 
