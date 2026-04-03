@@ -1,132 +1,111 @@
-# isort: skip_file
-# fmt: off
-
-import sys
-import os
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.abspath(os.path.join(BASE_DIR, ".."))
-
-sys.path.insert(0, PROJECT_ROOT)
-
-# --------------------------------------------------
-# Now ALL other imports are safe
-# --------------------------------------------------
+import argparse
 import requests
+import os
 import time
+from peer.ai_selector import select_best_peer
+from peer.config import TRACKER_URL
 
-from peer_model import PeerNode
-from src.ml.predict import predict_peer_score
-
-# --------------------------------------------------
-# Constants
-# --------------------------------------------------
-TRACKER_URL = "http://localhost:8000"
-DOWNLOAD_DIR = os.path.join(BASE_DIR, "shared", "downloads")
+# TRACKER_URL = "http://127.0.0.1:8000"
+DOWNLOAD_DIR = "peer/downloads"
+TOTAL_CHUNKS = 10  # adjust
 
 
 def get_peers():
-    resp = requests.get(f"{TRACKER_URL}/peers")
-    resp.raise_for_status()
-    return resp.json()
+    try:
+        r = requests.get(f"{TRACKER_URL}/peers")
+        return r.json()
+    except:
+        return {}
 
 
-def get_peer_chunks(peer):
-    url = f"http://{peer.address}:{peer.port}/chunks"
-    start = time.time()
-    resp = requests.get(url)
-    latency = (time.time() - start) * 1000
-
-    resp.raise_for_status()
-    peer.latency = latency
-    peer.availability = len(resp.json()) / 10
-    return resp.json()
-
-
-def download_chunk(peer, chunk_name):
-    chunk_id = chunk_name.split("_")[1]
-    url = f"http://{peer.address}:{peer.port}/chunk/{chunk_id}"
-
-    start = time.time()
-    resp = requests.get(url)
-    duration = time.time() - start
-
-    resp.raise_for_status()
-
-    size = len(resp.content)
-    peer.upload_rate = size / max(duration, 0.001)
-    peer.reliability = min(1.0, peer.reliability + 0.05)
-
-    out_path = os.path.join(DOWNLOAD_DIR, chunk_name)
-    with open(out_path, "wb") as f:
-        f.write(resp.content)
-
-    print(f"⬇️  {chunk_name} from {peer.peer_id} | {peer.upload_rate:.1f} B/s")
-
-
-def rank_peers(peers):
-    for peer in peers:
-        peer.score = predict_peer_score(peer)
-    return sorted(peers, key=lambda p: p.score, reverse=True)
-
-
-def main():
+def download(peer_id):
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+    downloaded = set()
 
-    raw_peers = get_peers()
-    peers = [
-        PeerNode(pid, info["address"], info["port"])
-        for pid, info in raw_peers.items()
-    ]
-
-    downloaded = set(os.listdir(DOWNLOAD_DIR))
-
-    # for peer in peers:
-    #     try:
-    #         chunks = get_peer_chunks(peer)
-    #     except Exception:
-    #         continue
-
-    #     missing = [c for c in chunks if c not in downloaded]
-    #     if not missing:
-    #         continue
-
-    #     for best_peer in rank_peers(peers):
-    #         try:
-    #             download_chunk(best_peer, missing[0])
-    #             downloaded.add(missing[0])
-    #             break
-    #         except Exception:
-    #             best_peer.reliability *= 0.9
-
-    while True:
-        all_missing = set()
-
-        for peer in peers:
-            try:
-                chunks = get_peer_chunks(peer)
-                all_missing.update(chunks)
-            except Exception:
+    while len(downloaded) < TOTAL_CHUNKS:
+        for chunk_id in range(TOTAL_CHUNKS):
+            if chunk_id in downloaded:
                 continue
 
-        all_missing = [c for c in all_missing if c not in downloaded]
+            peers = get_peers()
+            result = select_best_peer(peers, peer_id)
 
-        if not all_missing:
-            print("✅ All chunks downloaded")
-            break
+            if not result:
+                continue
 
-        ranked_peers = rank_peers(peers)
+            pid, info = result
+            peer_url = f"http://{info['ip']}:{info['port']}"
 
-        for chunk in all_missing:
-            for best_peer in ranked_peers:
-                try:
-                    download_chunk(best_peer, chunk)
-                    downloaded.add(chunk)
-                    break
-                except Exception:
-                    best_peer.reliability *= 0.9
+            try:
+                r = requests.get(f"{peer_url}/chunk/{chunk_id}", timeout=3)
 
+                if r.status_code == 200:
+                    with open(f"{DOWNLOAD_DIR}/chunk_{chunk_id}", "wb") as f:
+                        f.write(r.content)
+
+                    downloaded.add(chunk_id)
+                    print(f"⬇️ chunk_{chunk_id} from {pid}")
+                    print(f"📊 Progress: {len(downloaded)}/{TOTAL_CHUNKS}")
+
+            except:
+                continue
+
+        time.sleep(1)
+
+# NORMAL
+    # while len(downloaded) < TOTAL_CHUNKS:
+    #     peers = get_peers()
+
+    #     for pid, info in peers.items():
+    #         if pid == peer_id:
+    #             continue
+
+    #         peer_url = f"http://{info['ip']}:{info['port']}"
+
+    #         for chunk_id in range(TOTAL_CHUNKS):
+    #             if chunk_id in downloaded:
+    #                 continue
+
+    #             try:
+    #                 r = requests.get(f"{peer_url}/chunk/{chunk_id}", timeout=3)
+
+    #                 if r.status_code == 200:
+    #                     with open(f"{DOWNLOAD_DIR}/chunk_{chunk_id}", "wb") as f:
+    #                         f.write(r.content)
+
+    #                     downloaded.add(chunk_id)
+    #                     print(f"chunk_{chunk_id} from {pid}")
+
+    #             except:
+    #                 continue
+
+    #     time.sleep(1)
+
+    print("Download complete!")
+    reconstruct()
+
+
+def reconstruct():
+    output = os.path.join(DOWNLOAD_DIR, "final_output.mp4")
+
+    chunks = sorted(
+        [f for f in os.listdir(DOWNLOAD_DIR) if f.startswith("chunk_")],
+        key=lambda x: int(x.split("_")[1])
+    )
+
+    with open(output, "wb") as out:
+        for chunk in chunks:
+            if chunk.startswith("chunk_"):
+                with open(os.path.join(DOWNLOAD_DIR, chunk), "rb") as f:
+                    out.write(f.read())
+
+    print(f"🎉 File ready: {output}")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--peer_id", required=True)
+
+    args = parser.parse_args()
+
+    download(args.peer_id)

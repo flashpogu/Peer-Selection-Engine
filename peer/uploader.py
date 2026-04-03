@@ -1,27 +1,39 @@
-from flask import Flask, send_file, jsonify
+from flask import Flask, send_file, abort
 import os
+import argparse
 
 app = Flask(__name__)
 
+# Absolute path (IMPORTANT)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CHUNK_DIR = os.path.join(BASE_DIR, "shared", "chunks")
 
 
-@app.route("/chunks", methods=["GET"])
-def list_chunks():
-    return jsonify(os.listdir(CHUNK_DIR))
+@app.route("/chunk/<int:chunk_id>")
+def get_chunk(chunk_id):
+    try:
+        file_path = os.path.join(CHUNK_DIR, f"chunk_{chunk_id}")
 
+        print(f"Serving: {file_path}")  # debug
 
-@app.route("/chunk/<int:chunk_id>", methods=["GET"])
-def send_chunk(chunk_id):
-    chunk_path = os.path.join(CHUNK_DIR, f"chunk_{chunk_id}")
+        if os.path.exists(file_path):
+            return send_file(file_path)
+        else:
+            print("File not found")
+            return abort(404)
 
-    if not os.path.exists(chunk_path):
-        return jsonify({"error": "chunk not found"}), 404
-
-    return send_file(chunk_path, as_attachment=True)
+    except Exception as e:
+        print("ERROR in uploader:", e)
+        return "Internal Server Error", 500
 
 
 if __name__ == "__main__":
-    print("📤 Peer uploader running on http://localhost:9001")
-    app.run(host="0.0.0.0", port=9001)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, required=True)
+
+    args = parser.parse_args()
+
+    print(f"📤 Uploader running on http://localhost:{args.port}")
+    print(f"📂 Serving from: {CHUNK_DIR}")
+
+    app.run(host="0.0.0.0", port=args.port)

@@ -1,3 +1,5 @@
+import time
+
 from flask import Flask, request, jsonify
 from datetime import datetime
 
@@ -14,22 +16,32 @@ peers = {}
 
 @app.route("/register", methods=["POST"])
 def register_peer():
-    data = request.json
+    try:
+        data = request.get_json()
 
-    peer_id = data.get("peer_id")
-    address = data.get("address")
-    port = data.get("port")
+        print("Incoming data:", data)
 
-    if not peer_id or not address or not port:
-        return jsonify({"error": "missing fields"}), 400
+        if not data:
+            return jsonify({"error": "No JSON received"}), 400
 
-    peers[peer_id] = {
-        "address": address,
-        "port": port,
-        "last_seen": datetime.utcnow().isoformat()
-    }
+        peer_id = data.get("peer_id")
+        ip = data.get("ip")
+        port = data.get("port")
 
-    return jsonify({"status": "registered"})
+        if not peer_id or not ip or not port:
+            return jsonify({"error": "Missing fields"}), 400
+
+        peers[peer_id] = {
+            "ip": ip,
+            "port": port,
+            "last_seen": time.time()
+        }
+
+        return jsonify({"status": "registered"})
+
+    except Exception as e:
+        print("ERROR in /register:", e)
+        return jsonify({"error": str(e)}), 500
 
 
 # ----------------------------
